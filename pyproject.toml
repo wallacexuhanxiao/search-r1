@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "search-r1-bm25"
+version = "0.1.0"
+description = "BM25 Search-R1 style multi-turn retrieval agent scaffolding."
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.27",
+  "requests>=2.31",
+  "pydantic>=2.6",
+  "tqdm>=4.66",
+  "pyyaml>=6.0",
+  "regex>=2024.4",
+  "datasets>=2.19",
+  "transformers>=4.43",
+  "accelerate>=0.33",
+  "peft>=0.12",
+  "gradio>=4.36",
+  "ir_datasets>=0.5",
+]
+
+[project.optional-dependencies]
+retrieval = ["pyserini>=0.24"]
+dev = ["pytest>=8.0", "ruff>=0.5"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

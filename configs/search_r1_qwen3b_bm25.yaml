@@ -1,0 +1,64 @@
+seed: 42
+
+paths:
+  project_root: /root/autodl-tmp/search-r1-bm25/repo
+  data_root: /root/autodl-tmp/search-r1-bm25/data
+  model_root: /root/autodl-tmp/search-r1-bm25/models
+  cache_root: /root/autodl-tmp/search-r1-bm25/cache
+  checkpoint_root: /root/autodl-tmp/search-r1-bm25/checkpoints
+  log_root: /root/autodl-tmp/search-r1-bm25/logs
+
+model:
+  name: Qwen/Qwen2.5-3B-Instruct
+  dtype: bf16
+  gradient_checkpointing: true
+
+lora:
+  rank: 16
+  alpha: 32
+  dropout: 0.0
+  target_modules: all-linear
+
+rollout:
+  group_size: 4
+  temperature: 1.0
+  top_p: 0.95
+  max_search_turns: 2
+  max_model_length: 2048
+  max_observation_tokens: 384
+  max_query_tokens: 64
+
+retrieval:
+  type: bm25
+  backend: pyserini
+  host: 127.0.0.1
+  port: 8008
+  top_k: 3
+  index_dir: /root/autodl-tmp/search-r1-bm25/data/indexes/wiki2018-bm25
+  passages_path: /root/autodl-tmp/search-r1-bm25/data/passages/wiki2018_passages.jsonl
+  request_timeout: 10
+
+training:
+  method: LoRA-GRPO
+  framework: verl-agent
+  learning_rate: 1.0e-5
+  prompt_batch_size: 4
+  micro_batch_size: 1
+  total_steps: 300
+  eval_every: 25
+  save_every: 50
+
+grpo:
+  clip_ratio: 0.2
+  kl_coef: 0.001
+
+data:
+  train:
+    nq: 2000
+    hotpotqa: 2000
+  validation:
+    nq: 500
+    hotpotqa: 500
+  test:
+    nq: 500
+    hotpotqa: 500

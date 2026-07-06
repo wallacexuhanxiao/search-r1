@@ -1,0 +1,168 @@
+diff --git a/verl/utils/vllm_utils.py b/verl/utils/vllm_utils.py
+index 3778877..ec43366 100644
+--- a/verl/utils/vllm_utils.py
++++ b/verl/utils/vllm_utils.py
+@@ -69,7 +69,10 @@ from typing import List
+ 
+ from msgspec import field
+ from packaging import version as vs
+-from vllm.lora.models import LoRAModel
++try:
++    from vllm.lora.models import LoRAModel
++except ImportError:
++    from vllm.lora.lora_model import LoRAModel
+ from vllm.lora.request import LoRARequest
+ from vllm.lora.utils import get_adapter_absolute_path
+ from vllm.lora.worker_manager import LRUCacheWorkerLoRAManager
+@@ -191,6 +194,7 @@ class VLLMHijack():
+                 # Validates the LoRA configuration against requirements before
+                 # loading weights, throwing an exception if validation fails.
+                 peft_helper.validate_legal(self.lora_config)
++                _lora_extra_vocab_size = getattr(self.lora_config, "lora_extra_vocab_size", 0)
+ 
+                 # For some models like Qwen2VL, we need to use hf_to_vllm_mapper
+                 # to ensure correct loading of lora weights.
+@@ -207,10 +211,7 @@ class VLLMHijack():
+                         peft_helper=peft_helper,
+                         device="cpu",
+                         dtype=self.lora_config.lora_dtype,
+-                        embeddings=None,
+-                        target_embedding_padding=self.vocab_size + self.lora_config.lora_extra_vocab_size,
+-                        embedding_modules=self.embedding_modules,
+-                        embedding_padding_modules=self.embedding_padding_modules,
++                        model_vocab_size=self.vocab_size + _lora_extra_vocab_size,
+                         weights_mapper=hf_to_vllm_mapper
+                     )
+                 else:
+@@ -221,18 +222,16 @@ class VLLMHijack():
+                         lora_model_id=lora_request.lora_int_id,
+                         device="cpu",
+                         dtype=self.lora_config.lora_dtype,
+-                        target_embedding_padding=self.vocab_size +
+-                        self.lora_config.lora_extra_vocab_size,
+-                        embedding_modules=self.embedding_modules,
+-                        embedding_padding_modules=self.embedding_padding_modules,
++                        model_vocab_size=self.vocab_size + _lora_extra_vocab_size,
+                         weights_mapper=hf_to_vllm_mapper)
+             except Exception as e:
+                 raise e
+ 
+-            if lora.extra_vocab_size > self.lora_config.lora_extra_vocab_size:
+-                raise ValueError(f"LoRA added vocab size {lora.extra_vocab_size} "
++            _actual_extra_vocab_size = getattr(lora, "extra_vocab_size", 0)
++            if _actual_extra_vocab_size > _lora_extra_vocab_size:
++                raise ValueError(f"LoRA added vocab size {_actual_extra_vocab_size} "
+                                 f"is greater than lora_extra_vocab_size "
+-                                f"{self.lora_config.lora_extra_vocab_size}.")
++                                f"{_lora_extra_vocab_size}.")
+             return lora
+ 
+         def do_hijack(target_cls, target_method_name, hooking_method):
+diff --git a/verl/workers/actor/dp_actor.py b/verl/workers/actor/dp_actor.py
+index 853b45e..88c0aaa 100644
+--- a/verl/workers/actor/dp_actor.py
++++ b/verl/workers/actor/dp_actor.py
+@@ -39,10 +39,20 @@ from verl.utils.torch_functional import logprobs_from_logits
+ from verl.utils.ulysses import gather_outpus_and_unpad, ulysses_pad_and_slice_inputs, ulysses_pad
+ from verl.workers.actor import BasePPOActor
+ 
+-if is_cuda_available:
+-    from flash_attn.bert_padding import index_first_axis, pad_input, rearrange, unpad_input
+-elif is_npu_available:
+-    from transformers.integrations.npu_flash_attention import index_first_axis, pad_input, rearrange, unpad_input
++try:
++    _cuda_available = is_cuda_available() if callable(is_cuda_available) else is_cuda_available
++    _npu_available = is_npu_available() if callable(is_npu_available) else is_npu_available
++    if _cuda_available:
++        from flash_attn.bert_padding import index_first_axis, pad_input, rearrange, unpad_input
++    elif _npu_available:
++        from transformers.integrations.npu_flash_attention import index_first_axis, pad_input, rearrange, unpad_input
++except ImportError:
++    from einops import rearrange
++
++    def _missing_flash_attn(*args, **kwargs):
++        raise ImportError("flash_attn is required when use_remove_padding=True on CUDA")
++
++    index_first_axis = pad_input = unpad_input = _missing_flash_attn
+ 
+ 
+ __all__ = ["DataParallelPPOActor"]
+diff --git a/verl/workers/fsdp_workers.py b/verl/workers/fsdp_workers.py
+index 7d9b8b4..ba4eabd 100644
+--- a/verl/workers/fsdp_workers.py
++++ b/verl/workers/fsdp_workers.py
+@@ -185,7 +185,11 @@ class ActorRolloutRefWorker(Worker):
+         from torch import optim
+         from torch.distributed.fsdp import CPUOffload, MixedPrecision
+         from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+-        from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForVision2Seq
++        from transformers import AutoConfig, AutoModelForCausalLM
++        try:
++            from transformers import AutoModelForVision2Seq
++        except ImportError:
++            AutoModelForVision2Seq = None
+ 
+         from verl.utils.model import get_generation_config, print_model_size, update_model_config
+         from verl.utils.torch_dtypes import PrecisionType
+@@ -207,7 +211,7 @@ class ActorRolloutRefWorker(Worker):
+             torch_dtype = PrecisionType.to_dtype(torch_dtype)
+ 
+         # override model kwargs
+-        actor_model_config = AutoConfig.from_pretrained(local_path, trust_remote_code=trust_remote_code, attn_implementation="flash_attention_2")
++        actor_model_config = AutoConfig.from_pretrained(local_path, trust_remote_code=trust_remote_code, attn_implementation="sdpa")
+                 
+         # patch for kimi-vl
+         if getattr(actor_model_config, "model_type", None) == "kimi_vl":
+@@ -222,6 +226,8 @@ class ActorRolloutRefWorker(Worker):
+         }
+         override_config_kwargs.update(override_model_config)
+         update_model_config(actor_model_config, override_config_kwargs=override_config_kwargs)
++        actor_model_config._attn_implementation = "sdpa"
++        actor_model_config._attn_implementation_internal = "sdpa"
+         if self.rank == 0:
+             print(f"Model config after override: {actor_model_config}")
+ 
+@@ -230,7 +236,7 @@ class ActorRolloutRefWorker(Worker):
+ 
+         with init_context(), warnings.catch_warnings():
+             warnings.simplefilter("ignore")
+-            if type(actor_model_config) in AutoModelForVision2Seq._model_mapping.keys():
++            if AutoModelForVision2Seq is not None and type(actor_model_config) in AutoModelForVision2Seq._model_mapping.keys():
+                 actor_module_class = AutoModelForVision2Seq
+             else:
+                 actor_module_class = AutoModelForCausalLM
+@@ -240,6 +246,7 @@ class ActorRolloutRefWorker(Worker):
+                 torch_dtype=torch_dtype,
+                 config=actor_model_config,
+                 trust_remote_code=trust_remote_code,
++                attn_implementation="sdpa",
+             )
+ 
+             # Apply Liger kernel to the model if use_liger is set to True
+@@ -301,7 +308,7 @@ class ActorRolloutRefWorker(Worker):
+ 
+         auto_wrap_policy = get_fsdp_wrap_policy(module=actor_module, config=fsdp_config.get("wrap_policy", None), is_lora=self.config.model.get('lora_rank', 0) > 0)
+ 
+-        if self._is_rollout and self.config.rollout.name == "hf":
++        if self._is_rollout and self.config.rollout.name == "hf" and self.config.model.get("lora_rank", 0) <= 0:
+             # TODO(zhangchi.usc1992, shengguangming) fix me. Current, auto_wrap_policy causes HFRollout to hang in Gemma
+             auto_wrap_policy = None
+ 
+@@ -876,7 +883,7 @@ class CriticWorker(Worker):
+ 
+         from transformers import AutoConfig, AutoModelForTokenClassification
+ 
+-        critic_model_config = AutoConfig.from_pretrained(local_path, attn_implementation="flash_attention_2", trust_remote_code=config.model.get("trust_remote_code", False))
++        critic_model_config = AutoConfig.from_pretrained(local_path, attn_implementation="sdpa", trust_remote_code=config.model.get("trust_remote_code", False))
+         critic_model_config.num_labels = 1
+         # patch for kimi-vl
+         if getattr(critic_model_config, "model_type", None) == "kimi_vl":
+@@ -1200,7 +1207,7 @@ class RewardModelWorker(Worker):
+                 pretrained_model_name_or_path=local_path,
+                 config=model_config,
+                 torch_dtype=torch.bfloat16,
+-                attn_implementation="flash_attention_2",
++                attn_implementation="sdpa",
+                 trust_remote_code=trust_remote_code,
+             )
+ 

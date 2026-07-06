@@ -1,0 +1,32 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Local data/model artifacts. Keep these on the data disk, not in git.
+data/splits/
+data/passages/
+data/indexes/
+logs/
+checkpoints/
+models/
+cache/
+hf/
+tmp/
+wheels/
+
+# Training/runtime artifacts.
+*.log
+*.pt
+*.pth
+*.safetensors
+*.parquet
+wandb/
+outputs/
+rollouts/
+
+# Local backup files created during remote debugging.
+*.bak_*
+*.pre_*
