@@ -3,7 +3,7 @@
 This repo implements the fixed BM25-only Search-R1 scaffold:
 
 - Qwen/Qwen2.5-3B-Instruct
-- LoRA-GRPO through `verl-agent`
+- LoRA-GRPO / LoRA-GiGPO through `verl-agent`
 - local Wikipedia BM25 retrieval through Pyserini/Lucene
 - at most two model-generated searches
 - final-answer-only 0/1 reward
@@ -60,7 +60,7 @@ Smoke test:
 python -m search_r1_bm25.retrieval.client "author of The Old Man and the Sea"
 ```
 
-## Train
+## Train GRPO
 
 Start BM25 first, then run the smoke-and-train helper:
 
@@ -69,7 +69,7 @@ tmux new-session -d -s searchr1_retriever "cd /root/autodl-tmp/search-r1-bm25/re
 tmux new-session -d -s searchr1_train_300 "cd /root/autodl-tmp/search-r1-bm25/repo && bash scripts/wait_gpu_smoke_train.sh"
 ```
 
-The main training script now defaults to the v2 stability settings:
+The main GRPO script now defaults to the v2 stability settings:
 
 - `Qwen2.5-3B-Instruct`
 - LoRA rank 16 / alpha 32
@@ -81,7 +81,68 @@ The main training script now defaults to the v2 stability settings:
 - `actor_rollout_ref.actor.use_invalid_action_penalty=False` for final-answer-only reward
 - `save_freq=50`, `test_freq=50`, `total_training_steps=300`
 
-The first successful v1 run saved a resumable checkpoint at:
+## Train GiGPO comparison
+
+GiGPO uses the same model, data, BM25 retriever, LoRA rank, batch size, prompt length, response length, seed, and total steps as the GRPO v2 script. The only intended difference is the policy optimizer:
+
+```bash
+algorithm.adv_estimator=gigpo
+algorithm.gigpo.step_advantage_w=1.0
+algorithm.gigpo.mode=mean_std_norm
+algorithm.gigpo.enable_similarity=True
+algorithm.gigpo.similarity_thresh=0.9
+```
+
+Run a 1-step smoke test:
+
+```bash
+cd /root/autodl-tmp/search-r1-bm25/repo
+bash scripts/train_verl_search_gigpo.sh \
+  trainer.total_training_steps=1 \
+  trainer.val_before_train=False \
+  trainer.save_freq=-1 \
+  trainer.test_freq=-1 \
+  data.val_batch_size=4 \
+  2>&1 | tee /root/autodl-tmp/search-r1-bm25/logs/train_smoke_gigpo.log
+```
+
+Run the formal 300-step GiGPO experiment:
+
+```bash
+cd /root/autodl-tmp/search-r1-bm25/repo
+tmux new-session -d -s searchr1_gigpo_300 \
+"cd /root/autodl-tmp/search-r1-bm25/repo && bash scripts/train_verl_search_gigpo.sh 2>&1 | tee /root/autodl-tmp/search-r1-bm25/logs/train_300_gigpo.log"
+```
+
+Inspect GiGPO validation metrics:
+
+```bash
+grep -aE "step:[0-9]+ - val/" /root/autodl-tmp/search-r1-bm25/logs/train_300_gigpo.log
+```
+
+Compare GRPO vs GiGPO:
+
+```bash
+echo "GRPO"
+grep -aE "step:[0-9]+ - val/" /root/autodl-tmp/search-r1-bm25/logs/train_300.log
+
+echo "GiGPO"
+grep -aE "step:[0-9]+ - val/" /root/autodl-tmp/search-r1-bm25/logs/train_300_gigpo.log
+```
+
+Recommended comparison fields:
+
+- `val/nq/test_score`
+- `val/hotpotqa/test_score`
+- `val/nq/tool_call_count/mean`
+- `val/hotpotqa/tool_call_count/mean`
+- `val/success_rate`
+- `episode/reward/mean`
+- `episode/tool_call_count/mean`
+- `prompt_length/clip_ratio`
+- `timing_s/step`
+
+The first successful v1 GRPO run saved a resumable checkpoint at:
 
 ```bash
 /root/autodl-tmp/search-r1-bm25/third_party/verl-agent/checkpoints/search_r1_bm25/qwen2_5_3b_lora_grpo_bm25/global_step_50
