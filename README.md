@@ -69,15 +69,19 @@ tmux new-session -d -s searchr1_retriever "cd /root/autodl-tmp/search-r1-bm25/re
 tmux new-session -d -s searchr1_train_300 "cd /root/autodl-tmp/search-r1-bm25/repo && bash scripts/wait_gpu_smoke_train.sh"
 ```
 
-The main training script defaults to:
+The main training script now defaults to the v2 stability settings:
 
 - `Qwen2.5-3B-Instruct`
 - LoRA rank 16 / alpha 32
 - vLLM rollout
 - GRPO group size 4 through `env.rollout.n=4`
-- `save_freq=50`, `test_freq=25`, `total_training_steps=300`
+- `data.max_prompt_length=2048`, `data.max_response_length=384`
+- `actor_rollout_ref.actor.optim.lr=5e-6`
+- `env.max_steps=3`, `env.history_length=3` to better enforce at most two searches before answer/termination
+- `actor_rollout_ref.actor.use_invalid_action_penalty=False` for final-answer-only reward
+- `save_freq=50`, `test_freq=50`, `total_training_steps=300`
 
-The first successful run saved a resumable checkpoint at:
+The first successful v1 run saved a resumable checkpoint at:
 
 ```bash
 /root/autodl-tmp/search-r1-bm25/third_party/verl-agent/checkpoints/search_r1_bm25/qwen2_5_3b_lora_grpo_bm25/global_step_50
@@ -91,3 +95,7 @@ The parser accepts one action per model continuation:
 - `<answer>final answer</answer>`
 
 Invalid trajectories receive reward 0. `<information>...</information>` is environment text and must be masked out by the rollout/training integration.
+
+## Notes from the v1 50-step run
+
+The initial v1 configuration used `lr=1e-5`, `max_prompt_length=1536`, `max_response_length=512`, `env.max_steps=4`, and `test_freq=25`. At step 50, validation scores dropped while tool-call counts increased. The v2 settings reduce policy-update aggressiveness, reduce response length, increase prompt budget, and cap the environment loop more tightly.
