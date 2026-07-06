@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -16,16 +17,25 @@ def build_index(
     input_path = Path(passages_path)
     output_path = Path(index_dir)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    args = [
-        "-collection", "JsonCollection",
-        "-input", str(input_path.parent),
-        "-index", str(output_path),
-        "-generator", "DefaultLuceneDocumentGenerator",
-        "-threads", str(threads),
-        "-memoryBuffer", str(memory_buffer_mb),
-        "-storeRaw",
-    ]
-    wrapper = f"""
+
+    # Pyserini indexes every JSONL file in the input directory. Put only the
+    # requested passage file in a clean temporary directory to avoid indexing
+    # stale/debug copies that may live next to the official corpus file.
+    with tempfile.TemporaryDirectory(prefix="pyserini_input_") as tmpdir:
+        tmp_input_dir = Path(tmpdir)
+        tmp_passages = tmp_input_dir / "passages.jsonl"
+        shutil.copyfile(input_path, tmp_passages)
+
+        args = [
+            "-collection", "JsonCollection",
+            "-input", str(tmp_input_dir),
+            "-index", str(output_path),
+            "-generator", "DefaultLuceneDocumentGenerator",
+            "-threads", str(threads),
+            "-memoryBuffer", str(memory_buffer_mb),
+            "-storeRaw",
+        ]
+        wrapper = f"""
 import sys
 import jnius_config
 jnius_config.add_options("-Xms256m", "-Xmx{java_heap}")
@@ -33,10 +43,10 @@ from pyserini.pyclass import autoclass
 JIndexCollection = autoclass("io.anserini.index.IndexCollection")
 JIndexCollection.main({args!r})
 """
-    with tempfile.NamedTemporaryFile("w", suffix="_pyserini_index.py", delete=False) as f:
-        f.write(wrapper)
-        wrapper_path = f.name
-    subprocess.run(["python", wrapper_path], check=True)
+        with tempfile.NamedTemporaryFile("w", suffix="_pyserini_index.py", delete=False) as f:
+            f.write(wrapper)
+            wrapper_path = f.name
+        subprocess.run(["python", wrapper_path], check=True)
 
 
 def main() -> None:
