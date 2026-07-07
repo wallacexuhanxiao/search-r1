@@ -1,0 +1,30 @@
+{
+  "summary": [
+    {
+      "group": "all",
+      "total": 1000,
+      "hit@1": 0.316,
+      "hit@3": 0.446,
+      "hit@5": 0.503,
+      "empty_rate": 0.0
+    },
+    {
+      "group": "nq",
+      "total": 500,
+      "hit@1": 0.26,
+      "hit@3": 0.41,
+      "hit@5": 0.482,
+      "empty_rate": 0.0
+    },
+    {
+      "group": "hotpotqa",
+      "total": 500,
+      "hit@1": 0.372,
+      "hit@3": 0.482,
+      "hit@5": 0.524,
+      "empty_rate": 0.0
+    }
+  ],
+  "mean_latency_ms": 43.05549547076225,
+  "p95_latency_ms": 107.9341359436512
+}

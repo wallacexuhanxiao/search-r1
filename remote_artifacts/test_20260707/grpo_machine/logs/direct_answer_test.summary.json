@@ -1,0 +1,17 @@
+{
+  "all": {
+    "total": 1000,
+    "em": 0.138,
+    "answer_rate": 0.987
+  },
+  "hotpotqa": {
+    "total": 500,
+    "em": 0.164,
+    "answer_rate": 1.0
+  },
+  "nq": {
+    "total": 500,
+    "em": 0.112,
+    "answer_rate": 0.974
+  }
+}
